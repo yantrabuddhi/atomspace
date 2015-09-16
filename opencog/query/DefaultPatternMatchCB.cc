@@ -283,8 +283,26 @@ bool DefaultPatternMatchCB::eval_term(const Handle& virt,
 	// do_evaluate callback.  Alternately, perhaps the
 	// EvaluationLink::do_evaluate() method should do this ??? Its a toss-up.
 
-	_temp_aspace.clear();
-	TruthValuePtr tvp(EvaluationLink::do_evaluate(&_temp_aspace, gvirt));
+	TruthValuePtr tvp;
+	// The instantiator would have taken care of expanding out
+	// and executing any FunctionLinks and the like.  Just use
+	// the TV value on the resulting atom.
+	//
+	// However, we also want to have a side-effect: the result of
+	// exeuctng one of these things should be placed into the atomspace.
+	Type vty = virt->getType();
+	if (EXECUTION_OUTPUT_LINK == vty or
+	    DEFINED_SCHEMA_NODE == vty or
+	    _classserver.isA(vty, FUNCTION_LINK))
+	{
+		gvirt = _as->add_atom(gvirt);
+		tvp = gvirt->getTruthValue();
+	}
+	else
+	{
+		_temp_aspace.clear();
+		tvp = EvaluationLink::do_evaluate(&_temp_aspace, gvirt);
+	}
 
 	// Avoid null-pointer dereference if user specified a bogus evaluation.
 	// i.e. an evaluation that failed to return a TV.
@@ -393,9 +411,35 @@ bool DefaultPatternMatchCB::eval_sentence(const Handle& top,
 	// groundings to variables, thus leading to bizarre conflicts
 	// and failures, and/or incomplete exploration of choices.
 	// What to do ??
-	throw InvalidParamException(TRACE_INFO,
-	            "Unknown logical connective %s\n",
-	            top->toShortString().c_str());
+
+	// --------------------------------------------------------
+	// If we are here, then what we have is some atom that is not
+	// normally "truth-valued". We can do one of three things:
+	// a) Throw an exception and complain.
+	// b) Invent a new link type: GetTruthValueLink, that 'returns'
+	//    the TV of the atom that it wraps.
+	// c) Do the above, without inventing a new link type.
+	// The below implements choice (c): i.e. it gets the TV of this
+	// atom, and checks to see if it is greater than 0.5 or not.
+	//
+	// There are several minor issues: 1) we need to check the TV
+	// of the grounded atom, not the TV of the pattern, and 2) if
+	// the atom is executable, we need to execute it.
+	try
+	{
+		Handle g = gnds.at(top);
+		TruthValuePtr tvp(g->getTruthValue());
+		dbgprt("non-logical atom has tv=%s\n", tvp->toString().c_str());
+		// XXX FIXME: we are making a crsip-logic go/no-go decision
+		// based on the TV strength. Perhaps something more subtle might be
+		// wanted, here.
+		bool relation_holds = tvp->getMean() > 0.5;
+		return relation_holds;
+	}
+	catch (...) {}
+
+	// If it's not grounded, then perhaps its executable.
+	return eval_term(top, gnds);
 }
 
 /* ===================== END OF FILE ===================== */

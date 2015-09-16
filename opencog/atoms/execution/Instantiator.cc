@@ -21,9 +21,11 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#include <opencog/atoms/core/DefineLink.h>
+#include <opencog/atoms/core/FunctionLink.h>
 #include <opencog/atoms/core/PutLink.h>
-#include <opencog/atoms/reduct/FunctionLink.h>
 #include <opencog/atoms/execution/ExecutionOutputLink.h>
+#include <opencog/atoms/reduct/FoldLink.h>
 #include <opencog/query/BindLinkAPI.h>
 
 #include "Instantiator.h"
@@ -35,13 +37,19 @@ Handle Instantiator::walk_tree(const Handle& expr)
 	Type t = expr->getType();
 
 	// Must not explore the insides of a QuoteLink.
+	// XXX TODO: Need to implement UNQUOTE_LINK here...
 	if (QUOTE_LINK == t)
 		return Handle(expr);
 
 	LinkPtr lexpr(LinkCast(expr));
 	if (not lexpr)
 	{
-		// If were are here, we are a Node.
+		// If we are here, we are a Node.
+		if (DEFINED_SCHEMA_NODE == t)
+		{
+			return walk_tree(DefineLink::get_definition(expr));
+		}
+
 		if (VARIABLE_NODE != t)
 			return Handle(expr);
 
@@ -123,6 +131,16 @@ Handle Instantiator::walk_tree(const Handle& expr)
 	// Fire execution links, if found.
 	if (classserver().isA(t, FUNCTION_LINK))
 	{
+		// FoldLink's cannot be handled by the factory below, due to
+		// ciruclar shared library dependencies. Yuck. Somethine better
+		// than a factory needs to be invented.
+		if (classserver().isA(t, FOLD_LINK))
+		{
+			Handle hl(FoldLink::factory(t, oset_results));
+			FoldLinkPtr flp(FoldLinkCast(hl));
+			return flp->execute(_as);
+		}
+
 		// ExecutionOutputLinks are not handled by the factory below.
 		// This is due to a circular shared-libarary dependency.
 		if (EXECUTION_OUTPUT_LINK == t)
